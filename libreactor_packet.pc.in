@@ -1,0 +1,10 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=${prefix}/include
+
+Name: libreactor_packet
+Description: libreactor package for raw network packet capture
+Version: @VERSION@
+Libs: -L${libdir} -lreactor_packet -lreactor -ldynamic
+Cflags: -I${includedir} -flto -fuse-linker-plugin
