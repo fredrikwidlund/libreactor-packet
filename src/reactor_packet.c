@@ -2,17 +2,20 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <stropts.h>
 #include <netdb.h>
 #include <time.h>
 #include <err.h>
 #include <sys/queue.h>
 #include <sys/mman.h>
 #include <net/if.h>
+#include <linux/if_arp.h>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
 #include <linux/filter.h>
 #include <linux/ip.h>
 #include <linux/udp.h>
+#include <linux/sockios.h>
 #include <arpa/inet.h>
 
 #include <dynamic.h>
@@ -26,11 +29,49 @@ static void reactor_packet_error(reactor_packet *p, char *reason)
   reactor_user_dispatch(&p->user, REACTOR_PACKET_EVENT_ERROR, reason);
 }
 
-static void reactor_packet_receive_packet(reactor_packet *p, uint8_t *begin, uint8_t *end)
+static void reactor_packet_frame_ip(reactor_packet_frame *f)
 {
-  static size_t count = 0;
+  struct iphdr *ip;
 
-  fprintf(stderr, "[%lu] size %lu\n", count ++, end - begin);
+  ip = f->layer[1].begin;
+  fprintf(stderr, "[ip proto %d]\n", ip->protocol);
+
+}
+
+static void reactor_packet_frame_ether(reactor_packet_frame *f)
+{
+  struct ethhdr *ether;
+  void *begin;
+
+  ether = f->layer[0].begin;
+  begin = (uint8_t *) f->layer[0].begin + sizeof *ether;
+  if (begin > f->layer[0].end)
+    return;
+  f->layer[0].end = begin;
+  f->layer[1].begin = begin;
+  f->layer[1].end = f->layer[0].end;
+
+  switch (ntohs(ether->h_proto))
+    {
+    case ETH_P_IP:
+      f->layer[1].type = ETH_P_IP;
+      reactor_packet_frame_ip(f);
+      break;
+    }
+}
+
+static void reactor_packet_receive_frame(reactor_packet *p, uint8_t *begin, uint8_t *end)
+{
+  reactor_packet_frame f = {.layer[0] = {.type = p->link_type, .begin = begin, .end = end}};
+
+  switch (p->link_type)
+    {
+    case ARPHRD_ETHER:
+      reactor_packet_frame_ether(&f);
+      break;
+    }
+
+  reactor_user_dispatch(&p->user, REACTOR_PACKET_EVENT_FRAME, &f);
 }
 
 static void reactor_packet_receive(reactor_packet *p)
@@ -53,7 +94,7 @@ static void reactor_packet_receive(reactor_packet *p)
           tp = (struct tpacket3_hdr *) begin;
           if (tp->tp_len != tp->tp_snaplen)
             continue;
-          reactor_packet_receive_packet(p, begin + tp->tp_mac, begin + tp->tp_mac + tp->tp_len);
+          reactor_packet_receive_frame(p, begin + tp->tp_mac, begin + tp->tp_mac + tp->tp_len);
           begin += tp->tp_next_offset;
         }
 
@@ -76,6 +117,19 @@ static void reactor_packet_event(void *state, int type, void *data)
       reactor_packet_error(p, "socket event");
       break;
     }
+}
+
+static int reactor_packet_interface_type(reactor_packet *p)
+{
+  struct ifreq ifr = {0};
+  int e;
+
+  (void) strncpy(ifr.ifr_name, p->interface, sizeof(ifr.ifr_name));
+  e = ioctl(p->fd, SIOCGIFHWADDR, &ifr);
+  if (e == -1)
+    return -1;
+
+  return ifr.ifr_hwaddr.sa_family;
 }
 
 static int reactor_packet_socket(reactor_packet *p)
@@ -109,6 +163,10 @@ static int reactor_packet_socket(reactor_packet *p)
         .sll_ifindex = if_nametoindex(p->interface)
       }}, sizeof (struct sockaddr_ll));
   if (e == -1)
+    return -1;
+
+  p->link_type = reactor_packet_interface_type(p);
+  if (p->link_type == -1)
     return -1;
 
   reactor_core_fd_register(p->fd, reactor_packet_event, p, REACTOR_CORE_FD_MASK_READ);

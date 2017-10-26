@@ -44,7 +44,7 @@ int main(int argc, char **argv)
   reactor_core_construct();
   reactor_packet_open(&p, event, &p, argv[1]);
   reactor_packet_start(&p);
-  
+
   e = reactor_core_run();
   if (e == -1)
     err(1, "reactor_core_run");

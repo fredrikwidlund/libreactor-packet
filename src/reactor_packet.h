@@ -26,6 +26,7 @@ struct reactor_packet
   reactor_user          user;
 
   char                 *interface;
+  int                   link_type;
 
   int                   fd;
   size_t                frame_size;
