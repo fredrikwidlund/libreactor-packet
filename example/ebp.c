@@ -12,6 +12,7 @@
 #include <sys/queue.h>
 #include <linux/ip.h>
 #include <linux/udp.h>
+#include <arpa/inet.h>
 #include <err.h>
 
 #include <dynamic.h>
@@ -35,12 +36,32 @@ struct app
   list           streams;
 };
 
+app_stream *lookup(app *app, uint32_t ip, uint16_t port)
+{
+  app_stream *s;
+
+  list_foreach(&app->streams, s)
+    if (s->ip == ip && s->port == port)
+      return s;
+
+  list_foreach(&app->streams, s)
+    if (ip < s->ip || (ip == s->ip && port < s->port))
+      break;
+
+  list_insert(s, (app_stream []) {{.ip = ip, .port = port}}, sizeof *s);
+  return list_previous(s);
+}
+
 static void record(app *app, uint32_t ip, uint16_t port, uint8_t *data, size_t size)
 {
-  if (size - 12 % 188)
+  app_stream *s;
+
+  if ((size - 12) % 188 || data[0] != 0x80 || data[1] != 0x21)
     return;
 
-  fprintf(stderr, "%02x %02x\n", data[0], data[1]);
+  s = lookup(app, ip, port);
+  s->packets ++;
+  s->bytes += size;
 }
 
 
@@ -58,7 +79,19 @@ static void receive(app *app, reactor_packet_frame *f)
 
 static void report(app *app)
 {
-  //(void) fprintf(stderr, "[stats] packets %lu, udp data %lu\n", app->packets, app->udp_bytes);
+  app_stream *s;
+  char ip_string[16];
+  uint32_t ip;
+
+  (void) printf("\033[H\033[J");
+  list_foreach(&app->streams, s)
+    {
+      ip = htonl(s->ip);
+      inet_ntop(AF_INET, &ip, ip_string, sizeof ip_string); 
+      (void) printf("%s:%u - pps %lu, rate %.03f kbps\n", ip_string, s->port, s->packets, 8. * (double) s->bytes / 1000.);
+      s->packets = 0;
+      s->bytes = 0;
+    }
 }
 
 static void event(void *state, int type, void *data)
@@ -97,11 +130,12 @@ static void timer(void *state, int type, void *data)
 
 int main(int argc, char **argv)
 {
+  extern char *__progname;
   app app = {0};
   int e;
 
   if (argc != 2)
-    errx(1, "usage: ebp <interface>");
+    errx(1, "Usage: %s <interface>", __progname);
 
   reactor_core_construct();
   list_construct(&app.streams);
