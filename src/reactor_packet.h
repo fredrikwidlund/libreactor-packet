@@ -1,6 +1,10 @@
 #ifndef REACTOR_PACKET_H_INCLUDED
 #define REACTOR_PACKET_H_INCLUDED
 
+#ifndef REACTOR_PACKET_LAYER_MAX
+#define REACTOR_PACKET_LAYER_MAX 4
+#endif /* REACTOR_PACKET_LAYER_MAX */
+
 enum reactor_packet_state
 {
   REACTOR_PACKET_STATE_CLOSED = 0,
@@ -13,8 +17,16 @@ enum reactor_packet_event
 {
   REACTOR_PACKET_EVENT_ERROR,
   REACTOR_PACKET_EVENT_FRAME,
+  REACTOR_PACKET_EVENT_INVALID_FRAME
 };
 
+enum reactor_packet_protocol
+{
+  REACTOR_PACKET_PROTOCOL_DATA,
+  REACTOR_PACKET_PROTOCOL_ETHER,
+  REACTOR_PACKET_PROTOCOL_IP,
+  REACTOR_PACKET_PROTOCOL_UDP
+};
 typedef struct reactor_packet reactor_packet;
 typedef struct reactor_packet_layer reactor_packet_layer;
 typedef struct reactor_packet_frame reactor_packet_frame;
@@ -45,7 +57,7 @@ struct reactor_packet_layer
 
 struct reactor_packet_frame
 {
-  reactor_packet_layer  layer[4];
+  reactor_packet_layer  layer[REACTOR_PACKET_LAYER_MAX];
 };
 
 void reactor_packet_open(reactor_packet *, reactor_user_callback *, void *, char *);

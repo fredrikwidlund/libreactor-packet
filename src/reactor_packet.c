@@ -29,49 +29,93 @@ static void reactor_packet_error(reactor_packet *p, char *reason)
   reactor_user_dispatch(&p->user, REACTOR_PACKET_EVENT_ERROR, reason);
 }
 
-static void reactor_packet_frame_ip(reactor_packet_frame *f)
+static int reactor_packet_frame_data(reactor_packet_frame *f, int layer, uint8_t *begin, uint8_t *end)
 {
-  struct iphdr *ip;
+  if (layer >= REACTOR_PACKET_LAYER_MAX)
+    return -1;
 
-  ip = f->layer[1].begin;
-  fprintf(stderr, "[ip proto %d]\n", ip->protocol);
-
+  f->layer[layer].type = REACTOR_PACKET_PROTOCOL_DATA;
+  f->layer[layer].begin = begin;
+  f->layer[layer].end = end;
+  return 0;
 }
 
-static void reactor_packet_frame_ether(reactor_packet_frame *f)
+static int reactor_packet_frame_udp(reactor_packet_frame *f, int layer, uint8_t *begin, uint8_t *end)
 {
-  struct ethhdr *ether;
-  void *begin;
+  struct udphdr *udp = (struct udphdr *) begin;
 
-  ether = f->layer[0].begin;
-  begin = (uint8_t *) f->layer[0].begin + sizeof *ether;
-  if (begin > f->layer[0].end)
-    return;
-  f->layer[0].end = begin;
-  f->layer[1].begin = begin;
-  f->layer[1].end = f->layer[0].end;
+  if (layer >= REACTOR_PACKET_LAYER_MAX || (size_t) (end - begin) < sizeof *udp || (size_t) (end - begin) != ntohs(udp->len))
+      return -1;
+
+  f->layer[layer].type = REACTOR_PACKET_PROTOCOL_UDP;
+  f->layer[layer].begin = begin;
+  begin += sizeof *udp;
+  f->layer[layer].end = begin;
+  layer ++;
+
+  return reactor_packet_frame_data(f, layer, begin, end);
+}
+
+static int reactor_packet_frame_ip(reactor_packet_frame *f, int layer, uint8_t *begin, uint8_t *end)
+{
+  struct iphdr *ip = (struct iphdr *) begin;
+
+  if (layer >= REACTOR_PACKET_LAYER_MAX || (size_t) (end - begin) < sizeof *ip || end - begin < (ip->ihl << 2))
+    return -1;
+
+  f->layer[layer].type = REACTOR_PACKET_PROTOCOL_IP;
+  f->layer[layer].begin = begin;
+  begin += ip->ihl << 2;
+  f->layer[layer].end = begin;
+  layer ++;
+
+  switch (ip->protocol)
+    {
+    case IPPROTO_UDP:
+      return reactor_packet_frame_udp(f, layer, begin, end);
+    default:
+      return reactor_packet_frame_data(f, layer, begin, end);
+    }
+}
+
+static int reactor_packet_frame_ether(reactor_packet_frame *f, int layer, uint8_t *begin, uint8_t *end)
+{
+  struct ethhdr *ether = (struct ethhdr *) begin;
+
+  if (layer >= REACTOR_PACKET_LAYER_MAX || (size_t) (end - begin) < sizeof *ether)
+    return -1;
+
+  f->layer[layer].type = REACTOR_PACKET_PROTOCOL_ETHER;
+  f->layer[layer].begin = begin;
+  begin += sizeof *ether;
+  f->layer[layer].end = begin;
+  layer ++;
 
   switch (ntohs(ether->h_proto))
     {
     case ETH_P_IP:
-      f->layer[1].type = ETH_P_IP;
-      reactor_packet_frame_ip(f);
-      break;
+      return reactor_packet_frame_ip(f, layer, begin, end);
+    default:
+      return reactor_packet_frame_data(f, layer, begin, end);
     }
 }
 
 static void reactor_packet_receive_frame(reactor_packet *p, uint8_t *begin, uint8_t *end)
 {
-  reactor_packet_frame f = {.layer[0] = {.type = p->link_type, .begin = begin, .end = end}};
+  reactor_packet_frame f = {0};
+  int e;
 
   switch (p->link_type)
     {
     case ARPHRD_ETHER:
-      reactor_packet_frame_ether(&f);
+      e = reactor_packet_frame_ether(&f, 0, begin, end);
+      break;
+    default:
+      e = reactor_packet_frame_data(&f, 0, begin, end);
       break;
     }
 
-  reactor_user_dispatch(&p->user, REACTOR_PACKET_EVENT_FRAME, &f);
+  reactor_user_dispatch(&p->user, e == 0 ? REACTOR_PACKET_EVENT_FRAME : REACTOR_PACKET_EVENT_INVALID_FRAME, &f);
 }
 
 static void reactor_packet_receive(reactor_packet *p)
