@@ -1,7 +1,7 @@
 AUTOMAKE_OPTIONS = subdir-objects
 ACLOCAL_AMFLAGS = ${ACLOCAL_FLAGS} -I m4
 AM_CFLAGS = -std=gnu11 -g -O3 -flto -fuse-linker-plugin -Isrc
-AM_LDFLAGS = -static
+AM_LDFLAGS = -all-static
 
 EXTRA_DIST = \
 CHANGES \
@@ -25,7 +25,7 @@ pkgconfig_DATA = libreactor_packet.pc
 bin_PROGRAMS = \
 example/ebp
 
-example_ebp_LDFLAGS = -lreactor_packet -lreactor -ldynamic
+example_ebp_LDFLAGS = -lreactor_packet -lreactor -ldynamic -all-static
 
 MAINTAINERCLEANFILES = aclocal.m4 config.h.in configure Makefile.in docs/Makefile.in libreactor_packet-?.?.?.tar.gz
 maintainer-clean-local:; rm -rf autotools m4 libreactor_packet-?.?.?

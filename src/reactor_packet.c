@@ -8,8 +8,9 @@
 #include <err.h>
 #include <sys/queue.h>
 #include <sys/mman.h>
+
 #include <net/if.h>
-#include <linux/if_arp.h>
+#include <net/if_arp.h>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
 #include <linux/filter.h>
